@@ -1,38 +1,65 @@
 # 开发者：_Iamsleepingnow
-# 开发时间：2025-03-30 15:28
-# 开发功能：Noita存档备份程序3.0
+# 开发时间：2025-08-09 15:22
+# 开发功能：Noita存档备份程序3.1
 # encoding = utf-8
 # -----------------------------------------
 import os, sys, json, shutil, uuid, random, psutil
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt5.QtGui import QFont, QPixmap, QFontDatabase, QCursor
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
-    QPushButton, QScrollArea, QLineEdit, QTextEdit, QLabel, QMessageBox, QScrollBar, QSizePolicy
+QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
+QPushButton, QScrollArea, QLineEdit, QTextEdit, QLabel, QMessageBox, QScrollBar, QSizePolicy,
+QDialog # 新增
 )
+import datetime  # 用于记录时间戳
+import re  # 用于格式化时间显示
+
 
 # 定义全局变量
 user_manual = '''
 🧩脚本介绍🧩
 - 此脚本用于实现半自动Noita存读档，通过复制替换原存档save00来完成（save00是游戏的当前存档路径）。
 - 在使用脚本之前，需要事先在游戏中关闭steam云存档，否则脚本不会正常工作。
-- 在使用此脚本前，请务必要先将你的“save00”存档进行手动备份，数据无价，潜在的程序bug或误操作造成的丢档的损失作者将不予承担。
+- 在使用此脚本前，请务必要先将你的"save00"存档进行手动备份，数据无价，潜在的程序bug或误操作造成的丢档的损失作者将不予承担。
 
 🛠️如何使用🛠️
-1. 在需要保存游戏进度的时候，点游戏内部的“保存与退出”来手动保存游戏，待游戏正常退出后进入下一步：
-2. 点击脚本中的“新建存档栏位”，这时就能在下面的窗口中看见一个存档表单，注意：目前该存档是空存档，重启脚本后该空存档会被自动移除。
-3. 点击存档栏位中的“备份存档”，这时会将游戏存档“save00”复制一份并覆盖该存档栏位，这个过程需要一定时间，请耐心等待。当弹出成功提示时，代表该栏位不再是空存档了，重启脚本后该存档会被永久记录。
-4. 当点击存档栏位中的“替换存档”时，程序会将该栏位中的存档复制一份来替换“save00”存档。在该流程进行过程中请不要随便关闭脚本或开启游戏。
+1. 在需要保存游戏进度的时候，点游戏内部的"保存与退出"来手动保存游戏，待游戏正常退出后进入下一步：
+2. 点击脚本中的"新建存档栏位"，这时就能在下面的窗口中看见一个存档表单，注意：目前该存档是空存档，重启脚本后该空存档会被自动移除。
+3. 点击存档栏位中的"备份存档"，这时会将游戏存档"save00"复制一份并覆盖该存档栏位，这个过程需要一定时间，请耐心等待。当弹出成功提示时，代表该栏位不再是空存档了，重启脚本后该存档会被永久记录。
+4. 当点击存档栏位中的"替换存档"时，程序会将该栏位中的存档复制一份来替换"save00"存档。在该流程进行过程中请不要随便关闭脚本或开启游戏。
 5. 当替换存档弹出成功提示时，代表存档被替换完成，这时才能打开游戏并继续游戏。
-6. 当点击存档栏位中的“删除存档”时，程序会移除该栏位的存档，该操作不会影响“save00”存档。
+6. 当点击存档栏位中的"删除存档"时，程序会移除该栏位的存档，该操作不会影响"save00"存档。
+7. 每次备份存档时，程序会自动保存当前存档的历史版本。点击"历史版本"按钮可以查看、恢复或删除这些历史版本，避免误操作后无法找回。
+
+📜历史版本功能📜
+- 每次点击"备份存档"时，程序会自动将当前的存档版本保存为历史记录。
+- 点击"历史版本"按钮可以查看所有历史备份。
+- 每个存档最多保留10个历史版本，超过后会自动删除最早的版本。
+- 在历史版本窗口中，可以选择"恢复此版本"或"删除"操作。
+- 恢复历史版本会将当前存档替换为选中的历史版本。
 
 🧾其他事项🧾
-- 备份中的存档会被放置在总存档路径中，一般前缀为“save00”，如果脚本丢失了存档栏位的信息，可以将备份的存档进行手动重命名来替换“save00”存档。
-- 脚本的存档记录文件“archives.json”被放置在脚本的同级目录中，里面记录了存档的位置以及id号，除非出现了存档bug，否则不要删除它。
-- 每当有存档栏位备份存档时，都会在存档路径中更新“save00_Safe”安全存档，也就是说，安全存档永远是最后一次备份的存档，当存档崩溃时可以通过安全存档找回。
-''' # 用户手册
-font_path = ".\\UI\\unifont.ttf" # 全局字体路径
-image_path = ".\\Images" # 图片路径
+- 备份中的存档会被放置在总存档路径中，一般前缀为"save00"，如果脚本丢失了存档栏位的信息，可以将备份的存档进行手动重命名来替换"save00"存档。
+- 脚本的存档记录文件"archives.json"被放置在脚本的同级目录中，里面记录了存档的位置以及id号，除非出现了存档bug，否则不要删除它。
+- 每当有存档栏位备份存档时，都会在存档路径中更新"save00_Safe"安全存档，也就是说，安全存档永远是最后一次备份的存档，当存档崩溃时可以通过安全存档找回。
+'''
+
+
+def get_resource_path(relative_path):
+    """获取资源文件的绝对路径，适配打包后的环境"""
+    try:
+        # PyInstaller创建临时文件夹，将路径存储在_MEIPASS中
+        base_path = sys._MEIPASS
+    except AttributeError:
+        # 开发环境中的路径
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
+# 修改全局变量，使用新的路径获取函数
+font_path = get_resource_path("UI/unifont.ttf")
+image_path = get_resource_path("Images")
 title_text = 'NOITA存档备份3.0' # 标题文本
 basic_color_A = '#8777ae' # 基础色：紫色
 basic_color_B = '#cfbf6f' # 基础色：黄色
@@ -151,6 +178,118 @@ class ArchiveManager(QMainWindow):
             btn.setMaximumHeight(min_height)
             btn.setMinimumHeight(min_height)
         return btn
+
+    def create_history_version(self, archive_id):
+        """创建存档的历史版本"""
+        archive = next(a for a in self.archives if a["id"] == archive_id)
+
+        # 确保history字段存在
+        if "history" not in archive:
+            archive["history"] = []
+
+        # 生成历史版本ID和路径
+        history_id = str(uuid.uuid4())
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        history_path = os.path.join(self.game_path, f"save00_{archive_id}_history_{history_id}")
+
+        # 创建历史记录对象
+        history_entry = {
+            "id": history_id,
+            "timestamp": timestamp,
+            "path": history_path,
+            "comment": f"自动备份 - {timestamp}"
+        }
+
+        # 如果存档目录存在，复制一份作为历史版本
+        if os.path.exists(archive["path"]):
+            try:
+                shutil.copytree(archive["path"], history_path)
+                # 添加到历史记录列表
+                archive["history"].append(history_entry)
+                # 保留最近的10个历史版本，防止占用过多空间
+                if len(archive["history"]) > 10:
+                    oldest = archive["history"].pop(0)
+                    if os.path.exists(oldest["path"]):
+                        shutil.rmtree(oldest["path"])
+                self.save_archives()
+                return True
+            except Exception as e:
+                print(f"创建历史版本失败: {str(e)}")
+                return False
+        return False
+
+    def show_history_dialog(self, archive_id):
+        """显示历史版本对话框"""
+        archive = next(a for a in self.archives if a["id"] == archive_id)
+
+        # 如果没有历史记录，提示用户
+        if "history" not in archive or not archive["history"]:
+            self.open_warning_box("提示", "该存档没有历史版本。", QMessageBox.Ok)
+            return
+
+        # 创建历史版本对话框
+        history_dialog = HistoryVersionDialog(self, archive)
+        history_dialog.exec_()
+
+    def restore_history_version(self, archive_id, history_id):
+        """恢复到历史版本"""
+        archive = next(a for a in self.archives if a["id"] == archive_id)
+        history_entry = next(h for h in archive["history"] if h["id"] == history_id)
+
+        # 检查游戏是否运行
+        if self.check_game_running() and not self.show_game_running_warning():
+            return False
+
+        # 检查历史版本路径是否存在
+        if not os.path.exists(history_entry["path"]):
+            self.open_warning_box("错误", "历史版本不存在！", QMessageBox.Ok)
+            return False
+
+        try:
+            # 备份当前版本到临时目录
+            temp_backup = f"{archive['path']}_temp_{uuid.uuid4().hex}"
+            if os.path.exists(archive["path"]):
+                shutil.copytree(archive["path"], temp_backup)
+
+            # 用历史版本替换当前版本
+            if os.path.exists(archive["path"]):
+                shutil.rmtree(archive["path"])
+            shutil.copytree(history_entry["path"], archive["path"])
+
+            # 清理临时备份
+            if os.path.exists(temp_backup):
+                shutil.rmtree(temp_backup)
+
+            self.open_warning_box("成功", f"已恢复到历史版本: {history_entry['timestamp']}", QMessageBox.Ok)
+            return True
+        except Exception as e:
+            # 尝试恢复
+            if os.path.exists(temp_backup):
+                if os.path.exists(archive["path"]):
+                    shutil.rmtree(archive["path"])
+                shutil.copytree(temp_backup, archive["path"])
+                shutil.rmtree(temp_backup)
+
+            self.open_warning_box("错误", f"恢复历史版本失败: {str(e)}", QMessageBox.Ok)
+            return False
+
+    def delete_history_version(self, archive_id, history_id):
+        """删除历史版本"""
+        archive = next(a for a in self.archives if a["id"] == archive_id)
+        history_entry = next(h for h in archive["history"] if h["id"] == history_id)
+
+        try:
+            # 删除历史版本目录
+            if os.path.exists(history_entry["path"]):
+                shutil.rmtree(history_entry["path"])
+
+            # 从列表中移除
+            archive["history"] = [h for h in archive["history"] if h["id"] != history_id]
+            self.save_archives()
+            return True
+        except Exception as e:
+            self.open_warning_box("错误", f"删除历史版本失败: {str(e)}", QMessageBox.Ok)
+            return False
 
     def open_archive_dir(self):
         """打开总存档目录"""
@@ -271,6 +410,11 @@ class ArchiveManager(QMainWindow):
                 # 路径存在性检查
                 if not os.path.exists(archive["path"]):
                     continue
+
+                # 确保history字段存在
+                if "history" not in archive:
+                    archive["history"] = []
+
                 valid_archives.append(archive)
 
             self.archives = valid_archives
@@ -282,8 +426,7 @@ class ArchiveManager(QMainWindow):
         except FileNotFoundError:
             pass
         except json.JSONDecodeError:
-            self.open_warning_box(self, "错误", "配置文件损坏，已重置存档列表。")
-
+            self.open_warning_box("错误", "配置文件损坏，已重置存档列表。", QMessageBox.Ok)
     def save_archives(self):
         """保存存档数据"""
         with open(self.config_file, "w") as f:
@@ -346,13 +489,20 @@ class ArchiveManager(QMainWindow):
         """备份存档"""
         if self.check_game_running() and not self.show_game_running_warning():
             return  # 用户取消操作
+
         archive = next(a for a in self.archives if a["id"] == archive_id)
         src = os.path.join(self.game_path, "save00")
         dest = archive["path"]
 
         if not os.path.exists(src):
-            self.open_warning_box("错误", "未找到游戏存档目录！请检查C:\\Users\\[用户名]\\AppData\\LocalLow\\Nolla_Games_Noita\\save00路径是否合法。", QMessageBox.Ok)
+            self.open_warning_box("错误",
+                                  "未找到游戏存档目录！请检查C:\\Users\\[用户名]\\AppData\\LocalLow\\Nolla_Games_Noita\\save00路径是否合法。",
+                                  QMessageBox.Ok)
             return
+
+        # 先为当前存档创建历史版本（如果存档目录存在）
+        if os.path.exists(dest):
+            self.create_history_version(archive_id)
 
         self.current_worker = FileWorker(src, dest, "backup", self.game_path)
         self.current_worker.finished.connect(
@@ -454,6 +604,7 @@ class ArchiveManager(QMainWindow):
                 widget.btn_backup.setEnabled(enabled)
                 widget.btn_restore.setEnabled(enabled)
                 widget.btn_delete.setEnabled(enabled)
+                widget.btn_history.setEnabled(enabled)  # 添加对历史按钮的控制
                 widget.btn_up.setEnabled(enabled)
                 widget.btn_down.setEnabled(enabled)
 
@@ -487,6 +638,124 @@ class ArchiveManager(QMainWindow):
         self.scroll_layout.insertWidget(index + 1, item.widget())
 
         self.save_archives()
+
+
+class HistoryVersionDialog(QDialog):
+    def __init__(self, parent, archive):
+        super().__init__(parent)
+        self.parent = parent
+        self.archive = archive
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("存档历史版本")
+        self.setMinimumSize(600, 400)
+        self.setStyleSheet(f"background-color: {basic_color_A};")
+
+        layout = QVBoxLayout(self)
+
+        # 标题
+        title_label = QLabel(f"存档 '{self.archive['title']}' 的历史版本")
+        title_label.setFont(QFont(self.parent.font_name, 16))
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setStyleSheet(f"background-color: {basic_color_B}; padding: 8px;")
+        layout.addWidget(title_label)
+
+        # 历史版本列表
+        scrollbar = QScrollBar()
+        scrollbar.setStyleSheet(scrollbar_stylesheet)
+
+        scroll = QScrollArea()
+        scroll.setVerticalScrollBar(scrollbar)
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"border: 2px solid {basic_color_C};")
+
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setAlignment(Qt.AlignTop)
+
+        # 添加历史版本条目
+        for history in self.archive["history"]:
+            item = self.create_history_item(history)
+            content_layout.addWidget(item)
+
+        scroll.setWidget(content_widget)
+        layout.addWidget(scroll, 1)
+
+        # 底部按钮
+        btn_layout = QHBoxLayout()
+
+        close_btn = QPushButton("关闭")
+        close_btn.setFont(QFont(self.parent.font_name, 12))
+        close_btn.setStyleSheet(f"background-color: {basic_color_B}; padding: 8px;")
+        close_btn.clicked.connect(self.close)
+        btn_layout.addWidget(close_btn)
+
+        layout.addLayout(btn_layout)
+
+
+    def create_history_item(self, history):
+        """创建历史版本项"""
+        item = QFrame()
+        item.setStyleSheet(f"background-color: {basic_color_B}; border: 2px solid {basic_color_C}; margin: 4px;")
+
+        layout = QHBoxLayout(item)
+
+        # 时间戳和备注
+        info_layout = QVBoxLayout()
+
+        time_label = QLabel(f"时间: {history['timestamp']}")
+        time_label.setFont(QFont(self.parent.font_name, 12))
+        info_layout.addWidget(time_label)
+
+        comment_label = QLabel(f"备注: {history['comment']}")
+        comment_label.setFont(QFont(self.parent.font_name, 10))
+        info_layout.addWidget(comment_label)
+
+        layout.addLayout(info_layout, 1)
+
+        # 操作按钮
+        btn_layout = QHBoxLayout()
+
+        restore_btn = QPushButton("恢复此版本")
+        restore_btn.setFont(QFont(self.parent.font_name, 10))
+        restore_btn.setStyleSheet(f"background-color: {basic_color_A}; padding: 5px;")
+        restore_btn.clicked.connect(lambda: self.restore_version(history["id"]))
+        btn_layout.addWidget(restore_btn)
+
+        delete_btn = QPushButton("删除")
+        delete_btn.setFont(QFont(self.parent.font_name, 10))
+        delete_btn.setStyleSheet(f"background-color: {basic_color_A}; padding: 5px;")
+        delete_btn.clicked.connect(lambda: self.delete_version(history["id"]))
+        btn_layout.addWidget(delete_btn)
+
+        layout.addLayout(btn_layout)
+
+        return item
+
+    def restore_version(self, history_id):
+        """恢复到历史版本"""
+        reply = self.parent.open_warning_box(
+            "确认恢复",
+            "确定要恢复到此历史版本吗？当前存档将被替换。",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            if self.parent.restore_history_version(self.archive["id"], history_id):
+                self.close()  # 成功后关闭对话框
+
+    def delete_version(self, history_id):
+        """删除历史版本"""
+        reply = self.parent.open_warning_box(
+            "确认删除",
+            "确定要删除此历史版本吗？此操作不可撤销。",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            if self.parent.delete_history_version(self.archive["id"], history_id):
+                # 重新加载对话框
+                self.close()
+                self.parent.show_history_dialog(self.archive["id"])
 
 # 存档栏位子窗口
 class ArchiveItem(QFrame):
@@ -559,6 +828,7 @@ class ArchiveItem(QFrame):
         self.btn_backup = self.parent.add_pushbutton('💾备份存档💾', f'background-color: {basic_color_B};', 14, -1, 50)
         self.btn_restore = self.parent.add_pushbutton('🎯覆盖存档🎯', f'background-color: {basic_color_B};', 14, -1, 50)
         self.btn_delete = self.parent.add_pushbutton('🗑️删除备份🗑️', f'background-color: {basic_color_B};', 14, -1, 50)
+        self.btn_history = self.parent.add_pushbutton('📜历史版本📜', f'background-color: {basic_color_B};', 14, -1, 50)
         self.btn_up = self.parent.add_pushbutton('🔼', f'background-color: {basic_color_B};', 18, 50, 50)
         self.btn_down = self.parent.add_pushbutton('🔽', f'background-color: {basic_color_B};', 18, 50, 50)
         self.btn_openpath = self.parent.add_pushbutton('📁', f'background-color: {basic_color_B};', 18, 50, 50)
@@ -567,12 +837,14 @@ class ArchiveItem(QFrame):
         self.btn_backup.clicked.connect(lambda: self.parent.backup_archive(self.archive_id))
         self.btn_restore.clicked.connect(lambda: self.parent.restore_archive(self.archive_id))
         self.btn_delete.clicked.connect(lambda: self.parent.delete_archive(self.archive_id))
+        self.btn_history.clicked.connect(lambda: self.parent.show_history_dialog(self.archive_id))
         self.btn_up.clicked.connect(lambda: self.parent.move_archive_up(self.archive_id))
         self.btn_down.clicked.connect(lambda: self.parent.move_archive_down(self.archive_id))
 
         btn_layout.addWidget(self.btn_backup)
         btn_layout.addWidget(self.btn_restore)
         btn_layout.addWidget(self.btn_delete)
+        btn_layout.addWidget(self.btn_history)  # 添加历史按钮
         btn_layout.addWidget(self.btn_up)
         btn_layout.addWidget(self.btn_down)
         btn_layout.addWidget(self.btn_openpath)
@@ -678,10 +950,23 @@ class FileWorker(QThread):
                     error_msg = f"恢复失败：{str(e)}"
 
             elif self.operation == "delete":
+                archive_id = os.path.basename(self.dest).replace("save00_", "")
+
+                # 删除所有相关的历史版本
+                history_pattern = re.compile(f"save00_{archive_id}_history_")
+                for item in os.listdir(self.game_path):
+                    if history_pattern.match(item):
+                        history_path = os.path.join(self.game_path, item)
+                        if os.path.exists(history_path):
+                            try:
+                                shutil.rmtree(history_path)
+                            except:
+                                pass
+
+                # 删除主存档
                 if os.path.exists(self.dest):
                     shutil.rmtree(self.dest)
                 success = True
-
         except Exception as e:
             error_msg = str(e)
 
